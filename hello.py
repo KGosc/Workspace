@@ -48,7 +48,7 @@ def choose_text_file() -> str:
     root.attributes("-topmost", True)
     return filedialog.askopenfilename(
         title="Select a text file",
-        filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        filetypes=[("ISO files", "*.iso"), ("All files", "*.*")],
     )
 
 

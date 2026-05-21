@@ -18,6 +18,8 @@ t = []
 bounds = None
 last_folder = None
 last_filename = None
+last_Nz = None
+last_alpha = None
 
 # Configuration file for persisting last folder and filename
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), ".file_history.json")
@@ -77,8 +79,44 @@ def load_file_history() -> tuple:
 def save_file_history(folder: str, filename: str) -> None:
     """Save the last folder and filename to config file."""
     try:
+        data = {}
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                data = json.load(f)
+        data['folder'] = folder
+        data['filename'] = filename
         with open(CONFIG_FILE, 'w') as f:
-            json.dump({'folder': folder, 'filename': filename}, f)
+            json.dump(data, f)
+    except:
+        pass
+
+
+def load_parameters() -> tuple:
+    """Load the last Nz and alpha from the config file."""
+    global last_Nz, last_alpha
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                data = json.load(f)
+                last_Nz = data.get('Nz')
+                last_alpha = data.get('alpha')
+                return last_Nz, last_alpha
+        except:
+            pass
+    return None, None
+
+
+def save_parameters(Nz: int, alpha: float) -> None:
+    """Save the last Nz and alpha to the config file."""
+    try:
+        data = {}
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                data = json.load(f)
+        data['Nz'] = Nz
+        data['alpha'] = alpha
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(data, f)
     except:
         pass
 
@@ -138,13 +176,14 @@ def process_file(path: str) -> None:
 
     # Print extracted header values
     print("Extracted Header Values:")
+    print(f"       ISO file: {path}")
     print(f"  Sampling Rate: {sampling_rate}")
     print(f"   First Sample: {first_sample}")
     print(f"    Last Sample: {last_sample}")
     print(f"     No Samples: {no_samples}")
     print(f"       No Scans: {no_scans}")
     print()
-    input("Press Enter to continue...")
+    #input("Press Enter (1) to continue...")
 
     # Skip lines until the one with "[data]" (case-insensitive)
     data_start = None
@@ -186,7 +225,7 @@ def process_file(path: str) -> None:
             F.append(numbers[0])
 
     # Store first_sample and last_sample as a bounds pair
-    bounds = (first_sample, last_sample)
+    bounds = (first_sample+1, last_sample+1)
     
     # Create time array 't' with same size as F
     if sampling_rate and sampling_rate > 0:

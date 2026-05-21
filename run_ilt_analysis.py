@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 
 # Import from hello and laplace modules
 import hello
-import laplace
+import ilt
+import contin
 
 def main():
     """Main routine to run ILT analysis."""
@@ -19,13 +20,16 @@ def main():
     # Load file history
     hello.load_file_history()
     
+    # Load last parameters
+    hello.load_parameters()
+    
     # Choose and process file
     file_path = hello.choose_text_file()
     if not file_path:
         print("No file selected. Exiting.")
         sys.exit(0)
     
-    ###
+    """
     # ==================================================================================================================
     # tu zmodyfikować tak, aby zawsze można było wybrać plik, ale jeśli jest już zapisany w historii, to użyć tego
     # Use the last file from history
@@ -44,7 +48,7 @@ def main():
         print(f"Error: File not found: {file_path}")
         sys.exit(1)
     # ==================================================================================================================
-    ###
+    """
 
 
 
@@ -59,9 +63,22 @@ def main():
     print("Running Inverse Laplace Transform (ILT) Analysis")
     print("="*50)
     
-    # Call ILT with specified parameters
-    Nz = 64
-    alpha = 10.0
+    # Prompt for parameters
+    if hello.last_Nz is not None:
+        Nz_input = input(f"Number of spectrum points [{hello.last_Nz}]: ")
+        Nz = int(Nz_input) if Nz_input.strip() else hello.last_Nz
+    else:
+        Nz = int(input("Number of spectrum points: "))
+    
+    if hello.last_alpha is not None:
+
+        alpha_input = input(f"alpha [{hello.last_alpha}]: ")
+        alpha = float(alpha_input) if alpha_input.strip() else hello.last_alpha
+    else:
+        alpha = float(input("alpha: "))
+    
+    # Save parameters
+    hello.save_parameters(Nz, alpha)
     
     print(f"\nParameters:")
     print(f"  Nz = {Nz}")
@@ -71,7 +88,8 @@ def main():
     print()
     
     # Perform ILT
-    z, f, res_lsq, res_reg = laplace.ilt(hello.t, hello.F, hello.bounds, Nz, alpha)
+    z, f, res_lsq, res_reg = ilt.ilt(hello.t, hello.F, hello.bounds, Nz, alpha)
+    #z, f, restored = contin.Contin(hello.t, hello.F, hello.bounds, Nz, alpha)
     
     # Calculate zf = z*f for plotting
     zf = z * f
@@ -105,6 +123,7 @@ def main():
     plt.show()
     
     print("\nAnalysis complete!")
+    #input("Press Enter to exit...")
 
 if __name__ == "__main__":
     main()

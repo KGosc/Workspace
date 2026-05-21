@@ -1,121 +1,59 @@
-# Term Project: Inverse Laplace Transform of Real-valued Relaxation Data
-# @icaizk, Fall 2014
+def laplace(t, F, Nz, Reg_L1, Reg_L2, Reg_C, Reg_S, Bounds, Methods):
 
-# Main routine for Laplace transform inversion
-# call support routine: ldp()
+    """ Initiates routines for chosen method
 
-from __future__ import division
-import numpy as np
-import ldp
+    Parameters:
+    -------------
+    t : array 
+        Time domain data from experiment
+    F : array,
+        Transient data from experiment F(t)
+    Nz : int
+        Number of points z to compute, must be smaller than len(F)
+    Reg_L1, Reg_L2 : floats
+        Reg. parameters for FISTA(L1) and L2 regularization
+    Reg_C, Reg_S : floats
+        Reg. parameters for CONTIN and reSpect algorithms
+    Bounds : list
+        [lowerbound, upperbound] of s domain points
+    Methods : list 
+        Names of processing methods
 
-
-def ilt(t, F, bound, Nz, alpha):
-    """
-    DISCRIPTION:
-    -----------
-    This code performs Inverse Laplace Transform by constructing Regularized
-    NonNegative Least Squares (RNNLS) Problem [1], which is further converted
-    and solved by Least Distance Programming [2].
-
-    Note: This is a simplified and user-friendly version of CONTIN [1]
-    to address Inverse Laplace Transform only.
-
-    FORMULA OF LAPLACE TRANSFORM:
-    ----------------------------
-    F(t) = \int_lb^ub dz f(z) \exp(-z*t)
-
-    INPUT:
-    -----
-    t: array of t
-    F: array of F(t)
-    bound: [lowerbound, upperbound] of above integral
-    Nz: number of points z to compute, must be smaller than length(F)
-    alpha: regularization parameter
-
-    OUTPUT:
-    ------
-    z: array of z, equally spaced on LOG scale
-    f: array of f(z), inverse Laplace transform of F(t)
-
-    ----------------------------
-    @Zhikun Cai, NPRE, UIUC
-    ----------------------------
-
-    REFERENCE:
-    ---------
-    [1] Provencher, S. (1982), A constrained regularization method for
-        inverting data represented by linear algebraic or integral equations,
-        Computer Physics Communications, 27, 213?227.
-    [2] Lawson, C., & Hanson, R. (1974), Solving Least Squares Problems, SIAM
+    Returns:
+    -------------
+    data : list of [[s, f, F_restored, Method1], ...]
+        Data list for processed data
 
     """
+    import numpy as np
+    from L1_FISTA import l1_fista
+    from L2 import L2
+    from L1L2 import L1L2
+    from contin import Contin
+    from reSpect import reSpect
 
-    # pre-processing
-    if len(t) != len(F):
-        print('Error in ilt(): array t has different dimension from array F!')
-    if len(F) < Nz:
-        print('Error in ilt(): Nz is expected smaller than the dimension of F!')
+    data = []
 
-    # set up grid points (# = Nz)
-    h = np.log(bound[1]/bound[0])/(Nz - 1)      # equally spaced on logscale
-    z = bound[0]*np.exp(np.arange(Nz)*h)        # z (Nz by 1)
+    for i in Methods:
+        if i == 'FISTA':
+            s, f, F_hat = l1_fista(t, F, Bounds, Nz, Reg_L1)
+            data.append([s, f, F_hat, 'FISTA'])
 
-    # construct coefficients matrix C by integral discretization (trapzoidal)
-    # ||F - C*f||^2 = || F - \int_lb^ub [f(z)*z]*exp(-z*t) d(lnz) ||^2
-    z_mesh, t_mesh = np.meshgrid(z, t)
-    C = np.exp(-t_mesh*z_mesh)                   # specify integral kernel
-    C[:, 0] /= 2.
-    C[:, -1] /= 2.
-    C *= h
+        elif i == 'L2':
+            s, f, F_hat = L2(t, F, Bounds, Nz, Reg_L2)
+            data.append([s, f, F_hat, 'L2'])
 
-    # construct regularizor matrix R to impose smoothness
-    # || r - R*f ||^2 = || R*f ||^2 = \int_lb^ub [[z*f(z)]'']^2 d(lnz)
-    Nreg = Nz + 2
-    R = np.zeros([Nreg, Nz])
-    R[0, 0] = 1.
-    R[-1, -1] = 1.
-    R[1:-1, :] = -2*np.diag(np.ones(Nz)) + np.diag(np.ones(Nz-1), 1) \
-        + np.diag(np.ones(Nz-1), -1)
+        elif i == 'L1+L2':
+            s, f, F_hat = L1L2(t, F, Bounds, Nz, Reg_L1, Reg_L2)
+            data.append([s, f, F_hat, 'L1+L2'])
 
-    # 1st SVD of R, R = U*H*Z^T
-    U, H, Z = np.linalg.svd(R, full_matrices=False)     # H diagonal
-    Z = Z.T
-    H = np.diag(H)
-    print('\n-------------------------------')
-    print('1st SVD: rank(H) = %d' % np.linalg.matrix_rank(H))
+        elif i == 'Contin':
+            s, f, F_hat = Contin(t, F, Bounds, Nz, Reg_C)
+            data.append([s, f, F_hat, 'Contin'])
 
-    # 2nd SVD of C*Z*inv(H) = Q*S*W^T
-    Hinv = np.diag(1.0/np.diag(H))
-    Q, S, W = np.linalg.svd(C.dot(Z).dot(Hinv), full_matrices=False)  # S diag
-    W = W.T
-    S = np.diag(S)
-    print('2nd SVD: rank(S) = %d' % np.linalg.matrix_rank(S))
+        elif i == 'reSpect':
+            s, f, F_hat = reSpect(t, F, Bounds, Nz, Reg_S)
+            data.append([s, f, F_hat, 'reSpect'])
 
-    # construct GammaTilde & Stilde
-    # ||GammaTilde - Stilde*f5||^2 = ||Xi||^2
-    Gamma = np.dot(Q.T, F)
-    Sdiag = np.diag(S)
-    Salpha = np.sqrt(Sdiag**2 + alpha**2)
-    GammaTilde = Gamma*Sdiag/Salpha
-    Stilde = np.diag(Salpha)
-    print('regularized: rank(Stilde) = %d' % np.linalg.matrix_rank(Stilde))
-    print("-------------------------------")
-
-    # construct LDP matrices G = Z*inv(H)*W*inv(Stilde), B = -G*GammaTilde
-    # LDP: ||Xi||^2 = min, with constraint G*Xi >= B
-    Stilde_inv = np.diag(1.0/np.diag(Stilde))
-    G = Z.dot(Hinv).dot(W).dot(Stilde_inv)
-    B = -np.dot(G, GammaTilde)
-
-    # call LDP solver
-    Xi = ldp.ldp(G, B)
-
-    # final solution
-    zf = np.dot(G, Xi + GammaTilde)
-    f = zf/z
-
-    # residuals
-    res_lsq = F - np.dot(C, zf)
-    res_reg = np.dot(R, zf)
-
-    return z, f, res_lsq, res_reg
+    data = np.asarray(data, dtype="object")
+    return data

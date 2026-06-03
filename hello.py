@@ -1,10 +1,84 @@
+from dataclasses import dataclass
 import os
 import re
 import sys
 import json
 import tkinter as tk
 from tkinter import filedialog
+from typing import Tuple
 
+from numpy import number
+
+@dataclass  
+class Transient:    # stores both parameters and data taken from the ISO file
+    sampling_rate: float = None
+    first_sample: int = None
+    last_sample: int = None
+    no_samples: int = None
+    no_scans: int = None
+    F: list = None
+    t: list = None
+    bounds: Tuple[int, int] = None
+   # Ymax: float = 0.0
+   # invert: bool = False
+
+    def bounds(self) -> Tuple[int, int]:
+        return (self.first_sample, self.last_sample)
+    
+    def seekYmax(self, inbounds: Tuple[int, int] = None) -> Tuple[float, bool]:
+        # Find the maximum/minimum order and decide whether to invert the transient.
+        if self.F is None or len(self.F) == 0:
+            return 0.0, False
+
+        if inbounds is None:
+            if self.first_sample is None or self.last_sample is None:
+                inbounds = (0, len(self.F)-1)
+            else:
+                inbounds = (int(self.first_sample), int(self.last_sample))
+
+        start = int(inbounds[0])
+        end = int(inbounds[1])
+
+        if start < 0:
+            start = 0
+        if end > len(self.F)-1:
+            end = len(self.F)-1
+
+        if start >= end or start >= len(self.F):
+            return 0.0, False
+
+        imin = start
+        imax = start
+        Y1 = self.F[start]
+        Y2 = self.F[start]
+
+        for i, value in enumerate(self.F[start:end+1], start=start):    # slice does not include the end index, so we add 1
+            if value < Y1:  # Find the minimum value
+                Y1 = value
+                imin = i
+            if value > Y2:  # Find the maximum value
+                Y2 = value
+                imax = i
+
+        if imin > imax:     # If the minimum occurs further then the maximum, we invert the transient (KG)...
+            return Y2, True
+        # ...otherwise we leave it as is
+        return 0.0, False
+
+    def print_summary(self) -> None:
+        print("\nTransient summary:")
+        print(f"  sampling_rate: {self.sampling_rate}")
+        print(f"  first_sample: {self.first_sample}")
+        print(f"  last_sample: {self.last_sample}")
+        print(f"  no_samples: {self.no_samples}")
+        print(f"  no_scans: {self.no_scans}")
+        print(f"  bounds: {(self.first_sample, self.last_sample)}")
+        print(f"  F length: {len(self.F) if self.F is not None else 0}")
+        print(f"  t length: {len(self.t) if self.t is not None else 0}")
+        print(f"  Ymax: {self.Ymax}")
+        print(f"  invert: {self.invert}")
+
+T = Transient()
 
 start = 0
 numlines = 0
@@ -15,11 +89,14 @@ no_samples = None
 no_scans = None
 F = []
 t = []
+Tr = []
 bounds = None
 last_folder = None
 last_filename = None
 last_Nz = None
 last_alpha = None
+invert = False
+Ymax = 0.0
 
 # Configuration file for persisting last folder and filename
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), ".file_history.json")
@@ -134,12 +211,12 @@ def choose_text_file() -> str:
     )
 
 
-def process_file(path: str) -> None:
-    global start, numlines, sampling_rate, first_sample, last_sample, no_samples, no_scans, F, bounds, t
+def process_file(path: str) -> Tuple[float, bool]:
+    global start, numlines, sampling_rate, first_sample, last_sample, no_samples, no_scans, F, bounds, t, Tr, Ymax, invert, T
     
     if not os.path.isfile(path):
         print(f"The selected path is not a file: {path}")
-        return
+        return 0.0, False
 
     print(f"Reading: {path}\n")
 
@@ -194,11 +271,15 @@ def process_file(path: str) -> None:
 
     if data_start is None:
         print("No line containing '[data]' found.")
-        return
+        return 0.0, False
 
     print(f"Data section starts at line {data_start + 1}\n")
     start = data_start + 1
 
+    imin = 0
+    Y1 = sys.float_info.max # minimum
+    imax = 0
+    Y2 = sys.float_info.min  # maximum
     # Process lines starting from data_start
     for line in lines[data_start:]:
         line = line.rstrip("\n")
@@ -216,40 +297,87 @@ def process_file(path: str) -> None:
         stripped = line.lstrip()
         if stripped.startswith(";"):
             continue
-        
-        
+               
         # Parse and print numbers from the line
+        aux = 0.0
         numbers = parse_numbers(line)
         if numbers:
-            numlines += 1
-            F.append(numbers[0])
+            numlines += 1   # count the number of lines with valid data
+            aux = numbers[0]
+            F.append(aux)
+            if numlines >= first_sample+1 and numlines <= last_sample+1:    # if within the range of samples, we will check for the minimum and maximum values
+                if aux < Y1:  # Find the minimum value
+                    Y1 = aux
+                    imin = numlines
+                if aux > Y2:  # Find the maximum value
+                    Y2 = aux
+                    imax = numlines
 
-    # Store first_sample and last_sample as a bounds pair
-    bounds = (first_sample+1, last_sample+1)
-    
+    # adjust length of F to the number of valid lines read
+    no_samples = len(F)
+    # adjust bounds
+    if first_sample is not None and last_sample is not None:
+        if first_sample < 0 or first_sample >= no_samples:
+            first_sample = 0
+        if last_sample < 0 or last_sample >= no_samples:
+            last_sample = no_samples - 1
+    else:
+        first_sample = 0
+        last_sample = no_samples - 1
+
     # Create time array 't' with same size as F
     if sampling_rate and sampling_rate > 0:
-        t = [i / sampling_rate for i in range(len(F))]
+        t = [i / sampling_rate for i in range(no_samples)]
     else:
-        t = list(range(len(F)))  # Fallback if sampling_rate is not available
-    
+        t = list(range(no_samples))  # Fallback if sampling_rate is not available
+
+    # If the minimum occurs further then the maximum, we will invert the transient...
+    if imin > imax:    
+        Ymax =  Y2
+        invert = True
+    else:
+        # ...otherwise we leave it as is
+        Ymax = Y2
+        invert = False
+
+    # fill the global data structure
+    T.sampling_rate = sampling_rate
+    T.first_sample = first_sample+1
+    T.last_sample = last_sample+1
+    T.no_samples = no_samples
+    T.no_scans = no_scans
+    T.bounds = (T.first_sample, T.last_sample)  # adjusted for 1-based indexing
+    T.F = F
+    T.t = t
+    T.Ymax = Ymax
+    T.invert = invert
+
     # Print the collected data
     print("\nCollected Data:")
     for i in range(len(F)):
+        suffix = ""
+        if i == imin:
+            suffix = "\t\033[34m<- Min\033[0m"
+        elif i == imax:
+            suffix = "\t\033[38;5;214m<- Max\033[0m"
+
         if i == first_sample:
             # First line in green
-            print(f"\033[92m{i}: {t[i]}\t{F[i]}\033[0m")
+            print(f"\033[92m{i}: {t[i]}\t{F[i]}{suffix}\033[0m")
         elif i == last_sample:
             # Last line in red
-            print(f"\033[91m{i}: {t[i]}\t{F[i]}\033[0m")
+            print(f"\033[91m{i}: {t[i]}\t{F[i]}{suffix}\033[0m")
         else:
             # Normal color
-            print(f"{i}: {t[i]}\t{F[i]}")
+            if suffix != "":
+                print(f"{i}: {t[i]}\t{F[i]}{suffix}")   
+            #print(f"{i}: {t[i]}\t{F[i]}{suffix}")
     
     # Save the last folder and filename
     folder = os.path.dirname(path)
     filename = os.path.basename(path)
     save_file_history(folder, filename)
+    return Ymax, invert
 
 print("Hello! This program will help you find lines containing '[data]' in a text file.\n")
 if __name__ == "__main__":
@@ -261,5 +389,11 @@ if __name__ == "__main__":
         print("No file selected. Exiting.")
         sys.exit(0)
 
-    process_file(file_path)
+    Ymax, invert = process_file(file_path)
     print(f"\nDone processing the file: {numlines} lines starting from {start}.")
+    print(f"Ymax: {Ymax}, Invert: {invert}")
+
+    T.print_summary()
+    print(T.seekYmax())
+    print(int(T.bounds[0]),int(T.bounds[1]) ) # 
+

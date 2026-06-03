@@ -1,0 +1,254 @@
+!	Modyfikacje:
+! KG 2006
+! KG 05.2014 
+
+
+ subroutine makeinfile(xng,xemin,xemax,residu,sDurationc,vc,nv,regime,palpha,Y2,mno)
+	integer*2 residu,regime
+	real*8 palpha
+	dimension vc(*)
+
+	open(2,file='contin.in',access='sequential',form='formatted',status='unknown')
+
+    write(2,'(" NINTT                   1.")')
+    write(2,'(" IFORMY")')
+    write(2,'(" (E15.9)")')
+    write(2,'(" DOUSIN                 -1.")')
+    write(2,'(" NG                   ",f5.0)')xng
+    write(2,'(" GMNMX     1     ",es10.4)')xemin
+    write(2,'(" GMNMX     2     ",es10.4)')xemax
+! KG 2006; added - transient superimposed with line, not mere constant level
+    !if ( BIT(2,regime) ) then				
+    if ( BTEST(regime,2) ) then ! b2=1 - y(t)=A+B*t	
+	    write(2,'(" NLINF                   2.")')
+    else						! b2=0 - y(t)=A
+	    write(2,'(" NLINF                   1.")')
+    endif
+    write(2,'(" PRY                    -1.")')
+    write(2,'(" MPKMOM                  8.")')
+    write(2,'(" MOMNMX    1             0.")')
+    write(2,'(" MOMNMX    2             2.")')
+    write(2,'(" IPLRES    1             0.")')
+    write(2,'(" IPLRES    2             0.")')
+    write(2,'(" IPLFIT    1             0.")')
+    if(residu==1)then
+       write(2,'(" IPLFIT    2             2.")')
+    else
+       write(2,'(" IPLFIT    2             0.")')    
+    endif
+! KG 2006; modified to use BIT()
+!    if( BIT(0,regime) ) then				
+    if( BTEST(regime,0) ) then			   ! b0=1
+       write(2,'(" ALPST     1             0.")')
+       write(2,'(" ALPST     2             0.")')
+    else						! b0=0
+       write(2,'(" ALPST     1     ",es10.4)')palpha
+       write(2,'(" ALPST     2     ",es10.4)')palpha
+    endif
+
+    write(2,'(" IPRINT    1             0.")')
+    write(2,'(" IPRINT    2             2.")')       
+    write(2,'(" NERFIT                  0.")')
+    write(2,'(" IUSER    10             4.")')
+    write(2,'(" RUSER    21             1.")')
+    write(2,'(" RUSER    22             1.")')
+! KG 2006; modified to use BIT()
+!    if( BIT(1,regime) )then		
+    if( BTEST(regime,1) )then		       ! b1=1
+       write(2,'(" RUSER    23             1.")')
+    else					! b1=0
+       write(2,'(" RUSER    23             0.")')
+    endif
+! w miejsce:
+!    if(regime==0 .or. regime==1)then
+!       write(2,'(" RUSER    23             0.")')
+!    else
+!       write(2,'(" RUSER    23             1.")')
+!    endif
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    write(2,'(" LUSER     3            -1.")')
+    write(2,'(" END")')
+    write(2,'(" NSTEND",i5,10x,"0.E+0",6x,es9.4e1)')nv,(nv-1)*sDurationc
+    mult=1
+	call skY2(vc,nv,Y2,mno)
+	! write data section, possible reverted when input was decaing (instead of raising to saturation)
+    do i = 1,nv
+       write(2,'(e14.8)')Y2+mno*vc(i)
+    enddo
+
+    Close(2)
+
+    return
+
+ end subroutine makeinfile
+!-----------------------------------------------------------
+
+! KG 05.2014 - bslope and LINEFIT added to service linear baseline fit
+ subroutine conout(alphav,baseline,bslope,nsp,npeak,SpectrumP,Peakz,vc,Y2,mno,LINEFIT)
+    use typesdef
+
+	character (130) line
+	logical FOUND,POINTS,INTEGRAL,ALPHA,RESI,l1
+	integer*2 npeak,nsp
+	dimension vc(*)
+	type(Spectrum) SpectrumP(*)
+	type(Peak) Peakz(*)
+	logical LINEFIT			! KG 05.2014 - .true. indicates linear fit, .false. - plain constant shift
+
+
+	FOUND=.false.
+	POINTS=.false.
+	INTEGRAL=.false.
+	ALPHA=.false.
+	RESI=.false.
+	l1=.true.
+    IO=0
+    npeak=0
+	nsp=0
+
+	open(2,file='contin.out',status='old')
+
+ 	   do while (IO /= -1)              ! check for EOF
+	       read(2,'(a110)', IOSTAT = IO)line
+           If(Index(line,'PLOT OF DATA (O) AND FIT TO DATA (X)')/=0) Then
+			  RESI=.true.
+			  exit
+		   Elseif(Index(line,'+++  CHOSEN SOLUTION')/=0) Then
+              FOUND = .true.
+              exit
+           EndIf
+	   enddo 
+	   if(RESI)Then
+           call residuals(vc,nst)
+ 	   Endif
+
+
+	loop2: do while (IO /= -1)              ! check for EOF
+	    read(2,'(a110)', IOSTAT = IO)line
+
+	    If(.Not. FOUND) Then           !searches for section beginning
+            If(Index(line,'+++  CHOSEN SOLUTION')/=0) Then
+                FOUND = .true.
+            EndIf
+	    Else
+            If(.not.POINTS .and. .not.INTEGRAL .and. .not.ALPHA)Then  !searching for subsections
+                If(index(line(:15),'ORDINATE')/=0) Then
+                    POINTS=.true.
+                    cycle              !section starts in next line
+                ElseIf(index(line(:15),'PEAK')/=0) Then
+                    INTEGRAL = .true.
+                    cycle
+                ElseIf(index(line(:15),'ALPHA ')/=0) Then
+					ALPHA=.false.
+				    read(2,"(a110)")line
+					read(line(1:15),*)alphav
+                    cycle
+                End If
+            End If
+            If (POINTS) Then      !data subsection
+                If(line(:2)/='  ')Then  !end-of-subsection
+                    POINTS=.false.
+	                read(line(24:35),*)bl
+                    baseline=(bl-Y2)/mno
+					If(LINEFIT)Then		! KG 05.2014
+		                read(line(56:67),*)bl
+		                bslope=bl/mno	!!!!!! the slope is not shifted, only its sign has to be changed
+					End If
+                Else                          !get data row
+                    nsp=nsp+1
+					read(line(24:32),*)SpectrumP(nsp)%f
+					read(line( 4:12),*)SpectrumP(nsp)%s
+					read(line(15:21),*)SpectrumP(nsp)%e
+                End If
+            ElseIf (INTEGRAL) Then	          !area subsection
+                INTEGRAL =.false.
+                npeak=npeak+1
+
+				read(line(49:56),*)p1
+				read(line(65:68),'(i4)')ii
+				read(line(77:85),*)pe
+				ptest=p1**2
+				Peakz(npeak)%a=p1*10.**ii
+
+				read(2,"(a130)")line
+				read(line(96:106),*)Peakz(npeak)%f
+				read(line(112:122),*)espe
+				read(line(49:56),*)p1
+				read(line(65:68),'(i4)')ii
+				ptest=ptest+p1**2
+				xm=p1*10.**ii
+
+				read(2,"(a110)")line
+				read(line(49:56),*)p1
+				read(line(65:68),'(i4)')ii
+				ptest=ptest+p1**2
+				x2m=p1*10.**ii
+				Peakz(npeak)%b=sqrt(abs(x2m-xm**2))
+				Peakz(npeak)%fe=xm*pe/100
+				Peakz(npeak)%ae=Peakz(npeak)%f*espe/100
+
+				if(ptest<0.00001)npeak=npeak-1
+
+            End If
+        End If
+    enddo loop2
+    
+	Close(2)
+
+    return
+   
+ end subroutine conout
+!-----------------------------------------------------------
+
+  subroutine skY2(vc,nv,Y2,mno)
+    dimension vc(*)
+
+    ! find minimuum and maximum values and their indexes
+    imin = 0; imax = 0
+    Y1 = vc(1); Y2 = Y1
+    do i=1,nv
+        If (Y1 > vc(i)) Then	! this is minimum
+           Y1 = vc(i)
+           imin = i
+        endif
+        If (Y2 < vc(i)) Then    ! this is maximum
+           Y2 = vc(i) 
+           imax = i
+        endif
+    enddo
+
+    If (imin < imax) Then	 ! min further than max, hence this is decay case! Revert transient and shift by max value
+        mno = -1
+    Else
+        mno = 1				 ! this is saturation case, leave as is
+        Y2 = 0
+    End If
+
+  end subroutine skY2
+!----------------------------------------------------------
+
+   Subroutine Residuals(vc,nst)
+	   character (130) line
+       dimension vc(*)
+
+	   open(1,file='contin.in',status='old')
+	   IO=0
+ 	   do while (IO /= -1)              ! check for EOF
+	      read(1,'(a110)', IOSTAT = IO)line
+          If(Index(line,'NSTEND')/=0) Then
+             read(line(9:12),*)nst
+	         exit
+          EndIf
+       enddo
+	   read(2,'(a110)', IOSTAT = IO)line
+	   read(2,'(a110)', IOSTAT = IO)line
+	   do i=1,nst
+	   	  read(2,'(e14.3)')rth
+		  read(1,'(e14.8)')rex
+		  vc(i)=rex-rth
+       enddo
+	   close(1)
+       return
+   end subroutine residuals
+!------------------------------------------------------------
+

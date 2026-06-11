@@ -19,64 +19,74 @@ class Transient:    # stores both parameters and data taken from the ISO file
     F: list = None
     t: list = None
     bounds: Tuple[int, int] = None
-   # Ymax: float = 0.0
-   # invert: bool = False
+    Ymin: float = 0.0
+    Ymax: float = 0.0
+    invert: bool = False
 
-    def bounds(self) -> Tuple[int, int]:
+    def getBounds(self) -> Tuple[int, int]:
         return (self.first_sample, self.last_sample)
     
-    def seekYmax(self, inbounds: Tuple[int, int] = None) -> Tuple[float, bool]:
+    def setBounds(self, bounds: Tuple[int, int]) -> Tuple[int, int]:
+        self.first_sample, self.last_sample = bounds
+        return (self.first_sample, self.last_sample)
+
+    def seekMinMax(self, bounds: Tuple[int, int] = None) -> Tuple[float, float, bool]:
+        if bounds is None:
+            bounds = self.getBounds()
+        frst, last = bounds
         # Find the maximum/minimum order and decide whether to invert the transient.
         if self.F is None or len(self.F) == 0:
-            return 0.0, False
+            return 0.0, 0.0, False
 
-        if inbounds is None:
-            if self.first_sample is None or self.last_sample is None:
-                inbounds = (0, len(self.F)-1)
-            else:
-                inbounds = (int(self.first_sample), int(self.last_sample))
-
-        start = int(inbounds[0])
-        end = int(inbounds[1])
-
-        if start < 0:
+        if frst is None:
+            frst = 0
+        if last is None:
+            last = len(self.F) - 1
+ 
+        start = int(frst)
+        end = int(last)
+        if start < 0:   # check bounds
             start = 0
         if end > len(self.F)-1:
             end = len(self.F)-1
+        if start > end:    # change order
+            imin = end
+            end = start
+            start = imin
 
         if start >= end or start >= len(self.F):
-            return 0.0, False
+            return 0.0, 0.0, False
 
         imin = start
         imax = start
-        Y1 = self.F[start]
-        Y2 = self.F[start]
+        Ymin = self.F[start]
+        Ymax = self.F[start]
 
         for i, value in enumerate(self.F[start:end+1], start=start):    # slice does not include the end index, so we add 1
-            if value < Y1:  # Find the minimum value
-                Y1 = value
+            if value < Ymin:  # Find the minimum value
+                Ymin = value
                 imin = i
-            if value > Y2:  # Find the maximum value
-                Y2 = value
+            if value > Ymax:  # Find the maximum value
+                Ymax = value
                 imax = i
 
-        if imin > imax:     # If the minimum occurs further then the maximum, we invert the transient (KG)...
-            return Y2, True
+        if imin > imax:     # If the minimum occurs further then the maximum, we will need to invert the transient F (KG)...
+            return Ymin, Ymax, True
         # ...otherwise we leave it as is
-        return 0.0, False
+        return Ymin, Ymax, False
 
     def print_summary(self) -> None:
         print("\nTransient summary:")
-        print(f"  sampling_rate: {self.sampling_rate}")
-        print(f"  first_sample: {self.first_sample}")
-        print(f"  last_sample: {self.last_sample}")
-        print(f"  no_samples: {self.no_samples}")
-        print(f"  no_scans: {self.no_scans}")
-        print(f"  bounds: {(self.first_sample, self.last_sample)}")
-        print(f"  F length: {len(self.F) if self.F is not None else 0}")
-        print(f"  t length: {len(self.t) if self.t is not None else 0}")
-        print(f"  Ymax: {self.Ymax}")
-        print(f"  invert: {self.invert}")
+        print(f"  Sampling_rate: {self.sampling_rate}")
+        print(f"  Number_of_samples: {int(self.no_samples)}")
+        print(f"  Number_of_scans: {int(self.no_scans)}")
+        print(f"  First_sample: {int(self.first_sample)}")
+        print(f"  Last_sample: {int(self.last_sample)}")
+        # print(f"  Transient length: {len(self.F) if self.F is not None else 0}")
+        # print(f"  bounds: {(self.first_sample, self.last_sample)}")
+        # print(f"  t length: {len(self.t) if self.t is not None else 0}")
+        # print(f"  Ymax: {self.Ymax}")
+        # print(f"  invert: {self.invert}")
 
 T = Transient()
 
@@ -96,6 +106,7 @@ last_filename = None
 last_Nz = None
 last_alpha = None
 invert = False
+Ymin = 0.0
 Ymax = 0.0
 
 # Configuration file for persisting last folder and filename
@@ -211,12 +222,12 @@ def choose_text_file() -> str:
     )
 
 
-def process_file(path: str) -> Tuple[float, bool]:
+def process_file(path: str) -> Tuple[float, float, bool]:
     global start, numlines, sampling_rate, first_sample, last_sample, no_samples, no_scans, F, bounds, t, Tr, Ymax, invert, T
     
     if not os.path.isfile(path):
         print(f"The selected path is not a file: {path}")
-        return 0.0, False
+        return 0.0, 0.0, False
 
     print(f"Reading: {path}\n")
 
@@ -255,10 +266,10 @@ def process_file(path: str) -> Tuple[float, bool]:
     print("Extracted Header Values:")
     print(f"       ISO file: {path}")
     print(f"  Sampling Rate: {sampling_rate}")
-    print(f"   First Sample: {first_sample}")
-    print(f"    Last Sample: {last_sample}")
-    print(f"     No Samples: {no_samples}")
-    print(f"       No Scans: {no_scans}")
+    print(f"   First Sample: {int(first_sample)}")
+    print(f"    Last Sample: {int(last_sample)}")
+    print(f"     No Samples: {int(no_samples)}")
+    print(f"       No Scans: {int(no_scans)}")
     print()
     #input("Press Enter (1) to continue...")
 
@@ -271,15 +282,15 @@ def process_file(path: str) -> Tuple[float, bool]:
 
     if data_start is None:
         print("No line containing '[data]' found.")
-        return 0.0, False
+        return 0.0, 0.0, False
 
     print(f"Data section starts at line {data_start + 1}\n")
     start = data_start + 1
 
     imin = 0
-    Y1 = sys.float_info.max # minimum
+    Ymin = sys.float_info.max # minimum
     imax = 0
-    Y2 = sys.float_info.min  # maximum
+    Ymax = sys.float_info.min  # maximum
     # Process lines starting from data_start
     for line in lines[data_start:]:
         line = line.rstrip("\n")
@@ -306,11 +317,11 @@ def process_file(path: str) -> Tuple[float, bool]:
             aux = numbers[0]
             F.append(aux)
             if numlines >= first_sample+1 and numlines <= last_sample+1:    # if within the range of samples, we will check for the minimum and maximum values
-                if aux < Y1:  # Find the minimum value
-                    Y1 = aux
+                if aux < Ymin:  # Find the minimum value
+                    Ymin = aux
                     imin = numlines
-                if aux > Y2:  # Find the maximum value
-                    Y2 = aux
+                if aux > Ymax:  # Find the maximum value
+                    Ymax = aux
                     imax = numlines
 
     # adjust length of F to the number of valid lines read
@@ -333,11 +344,9 @@ def process_file(path: str) -> Tuple[float, bool]:
 
     # If the minimum occurs further then the maximum, we will invert the transient...
     if imin > imax:    
-        Ymax =  Y2
         invert = True
     else:
         # ...otherwise we leave it as is
-        Ymax = Y2
         invert = False
 
     # fill the global data structure
@@ -377,7 +386,7 @@ def process_file(path: str) -> Tuple[float, bool]:
     folder = os.path.dirname(path)
     filename = os.path.basename(path)
     save_file_history(folder, filename)
-    return Ymax, invert
+    return Ymin, Ymax, invert
 
 print("Hello! This program will help you find lines containing '[data]' in a text file.\n")
 if __name__ == "__main__":
@@ -389,11 +398,15 @@ if __name__ == "__main__":
         print("No file selected. Exiting.")
         sys.exit(0)
 
-    Ymax, invert = process_file(file_path)
+    Ymin, Ymax, invert = process_file(file_path)
     print(f"\nDone processing the file: {numlines} lines starting from {start}.")
-    print(f"Ymax: {Ymax}, Invert: {invert}")
+    print(f"Ymin: {Ymin}, Ymax: {Ymax}, Invert: {invert}")
 
     T.print_summary()
-    print(T.seekYmax())
-    print(int(T.bounds[0]),int(T.bounds[1]) ) # 
+    print(T.seekMinMax())
+    print(T.seekMinMax((100, 2000)))
+    print(T.seekMinMax())
+    T.setBounds((100, 2000))
+    print(T.seekMinMax())
+    print(int(T.getBounds()[0]),int(T.getBounds()[1]) ) # 
 

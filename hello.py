@@ -9,6 +9,8 @@ from typing import Tuple
 
 from numpy import number
 
+from contin_fortran import makeINfile, ModeFlags
+
 @dataclass  
 class Transient:    # stores both parameters and data taken from the ISO file
     sampling_rate: float = None
@@ -389,6 +391,7 @@ def process_file(path: str) -> Tuple[float, float, bool]:
     return Ymin, Ymax, invert
 
 print("Hello! This program will help you find lines containing '[data]' in a text file.\n")
+
 if __name__ == "__main__":
     # Load the last folder and filename
     load_file_history()
@@ -404,9 +407,20 @@ if __name__ == "__main__":
 
     T.print_summary()
     print(T.seekMinMax())
-    print(T.seekMinMax((100, 2000)))
+"""    print(T.seekMinMax((100, 2000)))
     print(T.seekMinMax())
     T.setBounds((100, 2000))
     print(T.seekMinMax())
     print(int(T.getBounds()[0]),int(T.getBounds()[1]) ) # 
+"""
+Y, inv = makeINfile(
+    Ymax=Ymax,
+    invert=invert,
+    tStep=1.0 / T.sampling_rate,
+    vc=T.F,
+    regime=ModeFlags(alphauto=True, kernel=False, slanted=True, residuals=True),
+    xng=5,
+    palpha=1.0,
+    filename="contin.in"
+)
 

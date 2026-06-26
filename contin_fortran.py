@@ -18,18 +18,19 @@ class Peak: # Represents a peak with area, baseline, frequency, and errors
 
 @dataclass  
 class ModeFlags:    # Represents CONTIN mode flags:  point in the spectrum with frequency, signal, and error
-    alphauto: bool = False
-    kernel: int = 0
-    slanted: bool = False
-    residuals: bool = False
+    alphauto: bool = False  # TRUE == automatic alpha, FALSE == manual alpha, needs to be pointed to a variable containing initial value on entry that will be updated with the final value on exit
+    kernel: bool = True     # TRUE == Capacitance, FALSE == Current
+    slanted: bool = False   # TRUE == slanted baseline, FALSE == horizontal baseline
+    residuals: bool = False # TRUE == calculate and output residuals, FALSE == do not calculate residuals
 # ========================================================================================================
 #
 #def btest(value: int, bit: int) -> bool:    # Test if the bit at position 'bit' in 'value' is set (1) or not (0)
 #    return ((value >> bit) & 1) != 0
 # ========================================================================================================
 
+  # Find the maximum/minimum order and decide whether to invert the transient.
 def skY2(vc: List[float]) -> Tuple[float, int]:
-    """Find the maximum/minimum order and decide whether to invert the transient."""
+  
     if len(vc) == 0:
         return 0.0, 1
 
@@ -73,8 +74,8 @@ def makeINfile(
     tStep: float,  # time step for the transient in seconds
     vc: List[float],    # List of transient values
     regime: ModeFlags, #int,        # Regime flag to determine the fitting model and parameters
-    xng: int,       # Number of spectrum points
-    palpha: float,      # Alpha parameter for the fitting model, used if regime flag is not set to 0. On input sets max number of peaks to seek, on output returns actual number of peaks found.
+    xng: int,       # Number of spectrum points. On input sets max number of peaks to seek, on output returns actual number of peaks found.
+    palpha: float,      # Alpha parameter for the fitting.model, used if regime flag is not set to 0. On input sets initial value, on output returns final value.
     filename: str = "contin.in",
 ) -> Tuple[float, bool]:
     """Create the contin.in file and return the generated Ymax and invert values."""
@@ -110,7 +111,7 @@ def makeINfile(
         else:
             fout.write(" IPLFIT    2             0.\n")
 
-        if regime.alphaauto:
+        if regime.alphauto:
             fout.write(" ALPST     1             0.\n")
             fout.write(" ALPST     2             0.\n")
         else:
@@ -129,7 +130,7 @@ def makeINfile(
         else:
             fout.write(" RUSER    23             1.\n")     # s*xp(-st) [Current]
 
-        fout.write(" LUSER     3            -1.\n") # Flag to determine if the user-defined fitting function should be used, -1 means that it should not be used
+        fout.write(" LUSER     3            -1.\n")     # Flag to determine if the user-defined fitting function should be used, -1 means that it should not be used
         fout.write(" END\n")
         fout.write(
             f" NSTEND{int(xng):5d}{' ' * 10}0.E+0{' ' * 6}{((len(vc) - 1) * tStep):9.4E}\n"
@@ -346,13 +347,13 @@ if __name__ == "__main__":
     print("EXAMPLE 1: makeINfile + conout")
     print("=" * 80)
     
-    sample_vc = []  #   [0.1, 0.2, 0.15, 0.05, 0.0]
+    sample_vc = []      # [0.1, 0.2, 0.15, 0.05, 0.0]
     xng = len(sample_vc)
     xemin = 0.001
     xemax = 1.0
     residu = True
     sDurationc = 1.0
-    regime = ModeFlags(alphauto=False, kernel=True, slanted=False)
+    regime = ModeFlags(alphauto=False, kernel=True, slanted=False, residuals=True)
     palpha = 0.5
     
     # Create the input file and get Y2, invert parameters
@@ -425,7 +426,7 @@ if __name__ == "__main__":
     n_points = len(transient_data)
     
     # Setup fitting parameters
-    regime_settings = ModeFlags(alphauto=True, kernel=False, slanted=True)
+    regime_settings = ModeFlags(alphauto=True, kernel=False, slanted=True, residuals=True)
     
     # Step 1: Create input file
     Y2_val, invert_flag = makeINfile(

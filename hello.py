@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import json
+import subprocess
 import tkinter as tk
 from tkinter import filedialog
 from typing import Tuple
@@ -423,4 +424,23 @@ Y, inv = makeINfile(
     palpha=1.0,
     filename="contin.in"
 )
+
+contin_exe = "contin.exe"
+file_path = "D:\\Fortran"
+contin_params = [file_path, "contin.in"]
+try:
+    result = subprocess.run([file_path + "/" + contin_exe] + contin_params, check=True, capture_output=True, text=True)
+    print(f"Ran {contin_exe} with parameters: {contin_params}")
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+except FileNotFoundError:
+    print(f"Executable not found: {contin_exe}", file=sys.stderr)
+except subprocess.CalledProcessError as e:
+    print(f"{contin_exe} failed with return code {e.returncode}", file=sys.stderr)
+    if e.stdout:
+        print(e.stdout)
+    if e.stderr:
+        print(e.stderr, file=sys.stderr)
 
